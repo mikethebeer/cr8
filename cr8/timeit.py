@@ -8,11 +8,9 @@ import itertools
 
 from functools import partial
 from time import time
-from crate.client import connect
 
-from .cli import lines_from_stdin, to_int
 from .metrics import Stats
-from . import aio
+from . import aio, cli
 
 
 class Result:
@@ -40,20 +38,19 @@ class Result:
 class QueryRunner:
     def __init__(self, stmt, repeats, hosts, concurrency):
         self.stmt = stmt
-        self.hosts = hosts
         self.repeats = repeats
         self.concurrency = concurrency
-        self.conn = conn = connect(hosts)
-        cursor = conn.cursor()
-        self.loop = loop = aio.asyncio.get_event_loop()
-        self.execute = partial(aio.execute, loop, cursor)
+        self.loop = aio.asyncio.get_event_loop()
+        self.host = next(iter(hosts))
+        urls = itertools.cycle([u + '/_sql' for u in hosts])
+        self.execute = partial(aio.execute, urls)
 
     def warmup(self, num_warmup):
         statements = itertools.repeat((self.stmt,), num_warmup)
         aio.run(self.execute, statements, 0, loop=self.loop)
 
     def run(self):
-        version_info = self.get_version_info(self.conn.client.active_servers[0])
+        version_info = self.get_version_info(self.host)
 
         started = time()
         statements = itertools.repeat((self.stmt,), self.repeats)
@@ -82,15 +79,15 @@ class QueryRunner:
         }
 
 
-@argh.arg('hosts', help='crate hosts', type=str)
-@argh.arg('-w', '--warmup', type=to_int)
-@argh.arg('-r', '--repeat', type=to_int)
-@argh.arg('-c', '--concurrency', type=to_int)
+@argh.arg('hosts', help='crate hosts', type=cli.to_hosts)
+@argh.arg('-w', '--warmup', type=cli.to_int)
+@argh.arg('-r', '--repeat', type=cli.to_int)
+@argh.arg('-c', '--concurrency', type=cli.to_int)
 def timeit(hosts, stmt=None, warmup=30, repeat=30, concurrency=1):
     """ runs the given statement a number of times and returns the runtime stats
     """
     num_lines = 0
-    for line in lines_from_stdin(stmt):
+    for line in cli.lines_from_stdin(stmt):
         runner = QueryRunner(line, repeat, hosts, concurrency)
         runner.warmup(warmup)
         result = runner.run()

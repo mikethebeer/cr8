@@ -1,6 +1,8 @@
 
 from tqdm import tqdm
 import asyncio
+import aiohttp
+import json
 try:
     import uvloop
     asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
@@ -8,10 +10,18 @@ except ImportError:
     pass
 
 
-async def execute(loop, cursor, stmt, args=None):
-    f = loop.run_in_executor(None, cursor.execute, stmt, args)
-    await f
-    return cursor.duration
+async def execute(urls, stmt, args=None):
+    payload = {'stmt': stmt}
+    if args:
+        payload['args'] = args
+    data = json.dumps(payload)
+    url = next(urls)
+    with aiohttp.ClientSession() as session:
+        async with session.post(url, data=data) as resp:
+            r = await resp.json()
+            if 'error' in r:
+                raise ValueError(r['error']['message'])
+            return r['duration']
 
 
 async def execute_many(loop, cursor, stmt, bulk_args):

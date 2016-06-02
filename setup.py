@@ -27,6 +27,7 @@ setup(
         'crate',
         'argh',
         'tqdm',
+        'aiohttp',
         'fake-factory'
     ],
     extras_require={
