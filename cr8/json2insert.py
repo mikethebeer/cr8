@@ -64,8 +64,9 @@ def json2insert(table, bulk_size=1000, concurrency=100, hosts=None):
 
     loop = aio.asyncio.get_event_loop()
     stats = Stats()
-    f = partial(aio.measure, stats, aio.create_execute_many(hosts))
-    aio.run(f, bulk_queries, concurrency, loop)
+    with aio.Client(hosts, conn_pool_limit=concurrency) as client:
+        f = partial(aio.measure, stats, client.execute_many)
+        aio.run(f, bulk_queries, concurrency, loop)
     yield json.dumps(stats.get())
 
 

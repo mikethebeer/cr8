@@ -42,12 +42,11 @@ class QueryRunner:
         self.concurrency = concurrency
         self.loop = aio.asyncio.get_event_loop()
         self.host = next(iter(hosts))
-        urls = itertools.cycle([u + '/_sql' for u in hosts])
-        self.execute = partial(aio.execute, urls)
+        self.client = aio.Client(hosts, conn_pool_limit=concurrency)
 
     def warmup(self, num_warmup):
         statements = itertools.repeat((self.stmt,), num_warmup)
-        aio.run(self.execute, statements, 0, loop=self.loop)
+        aio.run(self.client.execute, statements, 0, loop=self.loop)
 
     def run(self):
         version_info = self.get_version_info(self.host)
@@ -55,7 +54,7 @@ class QueryRunner:
         started = time()
         statements = itertools.repeat((self.stmt,), self.repeats)
         stats = Stats(min(self.repeats, 1000))
-        measure = partial(aio.measure, stats, self.execute)
+        measure = partial(aio.measure, stats, self.client.execute)
 
         aio.run(measure, statements, self.concurrency, loop=self.loop)
         ended = time()
@@ -68,6 +67,15 @@ class QueryRunner:
             stats=stats,
             concurrency=self.concurrency
         )
+
+    def close(self):
+        self.client.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
 
     @staticmethod
     def get_version_info(server):
@@ -88,11 +96,11 @@ def timeit(hosts, stmt=None, warmup=30, repeat=30, concurrency=1):
     """
     num_lines = 0
     for line in cli.lines_from_stdin(stmt):
-        runner = QueryRunner(line, repeat, hosts, concurrency)
-        runner.warmup(warmup)
-        result = runner.run()
-        yield result
-        num_lines += 1
+        with QueryRunner(line, repeat, hosts, concurrency) as runner:
+            runner.warmup(warmup)
+            result = runner.run()
+            yield result
+            num_lines += 1
     if num_lines == 0:
         raise SystemExit(
             'No SQL statements provided. Use --stmt or provide statements via stdin')

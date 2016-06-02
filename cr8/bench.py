@@ -29,7 +29,7 @@ class Executor:
         self.spec_dir = spec_dir
         self.conn = connect(benchmark_hosts)
         self.loop = aio.asyncio.get_event_loop()
-        self.exec_many = aio.create_execute_many(benchmark_hosts)
+        self.client = aio.Client(benchmark_hosts)
 
         if result_hosts:
             def process_result(result):
@@ -65,7 +65,7 @@ class Executor:
             inserts = as_bulk_queries(self._to_inserts(data_file),
                                       data_file.get('bulk_size', 5000))
             concurrency = data_file.get('concurrency', 50)
-            aio.run(self.exec_many, inserts, concurrency=concurrency, loop=loop)
+            aio.run(self.client.execute_many, inserts, concurrency=concurrency, loop=loop)
             cursor.execute('refresh table {target}'.format(target=data_file['target']))
 
     def run_load_data(self, data_spec):
@@ -78,7 +78,7 @@ class Executor:
         if num_records:
             num_records = max(1, int(num_records / bulk_size))
         stats = Stats(size=num_records)
-        f = partial(aio.measure, stats, self.exec_many)
+        f = partial(aio.measure, stats, self.client.execute_many)
         start = time()
         aio.run(f,
                 inserts,
@@ -87,7 +87,7 @@ class Executor:
                 num_items=num_records)
         end = time()
         self.process_result(Result(
-            version_info=QueryRunner.get_version_info(self.conn.client.active_servers[0]),
+            version_info=QueryRunner.get_version_info(self.benchmark_hosts[0]),
             statement=statement,
             started=start,
             ended=end,
@@ -103,36 +103,41 @@ class Executor:
             iterations = query.get('iterations', 1)
             concurrency_range = get_concurrency_range(query.get('concurrency', 1))
             for concurrency in concurrency_range:
-                runner = QueryRunner(
-                    stmt,
-                    repeats=iterations,
-                    hosts=self.benchmark_hosts,
-                    concurrency=concurrency
-                )
-                result = runner.run()
-                self.process_result(result)
+                with QueryRunner(stmt,
+                                 repeats=iterations,
+                                 hosts=self.benchmark_hosts,
+                                 concurrency=concurrency) as runner:
+                    result = runner.run()
+                    self.process_result(result)
+
+    def close(self):
+        self.client.close()
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        self.close()
 
 
 @argh.arg('benchmark_hosts', type=to_hosts)
 def bench(spec, benchmark_hosts, result_hosts=None):
-    executor = Executor(
-        spec_dir=os.path.dirname(spec),
-        benchmark_hosts=benchmark_hosts,
-        result_hosts=result_hosts,
-    )
-    spec = load_spec(spec)
-    try:
-        yield 'Running setUp'
-        executor.exec_instructions(spec.setup)
-        yield 'Running benchmark'
-        if spec.load_data:
-            for data_spec in spec.load_data:
-                executor.run_load_data(data_spec)
-        else:
-            executor.run_queries(spec.queries)
-    finally:
-        yield 'Running tearDown'
-        executor.exec_instructions(spec.teardown)
+    with Executor(spec_dir=os.path.dirname(spec),
+                  benchmark_hosts=benchmark_hosts,
+                  result_hosts=result_hosts) as executor:
+        spec = load_spec(spec)
+        try:
+            yield 'Running setUp'
+            executor.exec_instructions(spec.setup)
+            yield 'Running benchmark'
+            if spec.load_data:
+                for data_spec in spec.load_data:
+                    executor.run_load_data(data_spec)
+            else:
+                executor.run_queries(spec.queries)
+        finally:
+            yield 'Running tearDown'
+            executor.exec_instructions(spec.teardown)
 
 
 def main():

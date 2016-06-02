@@ -14,7 +14,7 @@ from concurrent.futures import ProcessPoolExecutor
 
 from .json2insert import to_insert
 from .misc import parse_table
-from .aio import asyncio, consume, create_execute_many
+from .aio import asyncio, consume, Client
 from .cli import to_int, to_hosts
 
 
@@ -106,13 +106,12 @@ def generate_bulk_args(generate_row, bulk_size):
     return [generate_row() for i in range(bulk_size)]
 
 
-async def _produce_data_and_insert(q, hosts, stmt, bulk_args_fun, num_inserts):
-    insert = create_execute_many(hosts)
+async def _produce_data_and_insert(q, client, stmt, bulk_args_fun, num_inserts):
     executor = ProcessPoolExecutor()
     for i in range(num_inserts):
         args = await asyncio.ensure_future(
             loop.run_in_executor(executor, bulk_args_fun))
-        task = asyncio.ensure_future(insert(stmt, args))
+        task = asyncio.ensure_future(client.execute_many(stmt, args))
         await q.put(task)
     await q.put(None)
 
@@ -175,9 +174,10 @@ def fill_table(hosts,
 
     yield 'Generating fake data and executing inserts'
     q = asyncio.Queue(maxsize=concurrency)
-    loop.run_until_complete(asyncio.gather(
-        _produce_data_and_insert(q, hosts, stmt, bulk_args_fun, num_inserts),
-        consume(q, total=num_inserts)))
+    with Client(hosts) as client:
+        loop.run_until_complete(asyncio.gather(
+            _produce_data_and_insert(q, client, stmt, bulk_args_fun, num_inserts),
+            consume(q, total=num_inserts)))
 
 
 def main():
