@@ -12,7 +12,7 @@ from .bench_spec import load_spec
 from .timeit import QueryRunner, Result
 from .misc import as_bulk_queries, as_statements, get_lines
 from .metrics import Stats
-from .cli import dicts_from_lines
+from .cli import dicts_from_lines, to_hosts
 
 
 def get_concurrency_range(concurrency):
@@ -29,6 +29,7 @@ class Executor:
         self.spec_dir = spec_dir
         self.conn = connect(benchmark_hosts)
         self.loop = aio.asyncio.get_event_loop()
+        self.exec_many = aio.create_execute_many(benchmark_hosts)
 
         if result_hosts:
             def process_result(result):
@@ -60,12 +61,11 @@ class Executor:
             cursor.execute(stmt)
 
         loop = self.loop
-        f = partial(aio.execute_many, loop, cursor)
         for data_file in instructions.data_files:
             inserts = as_bulk_queries(self._to_inserts(data_file),
                                       data_file.get('bulk_size', 5000))
             concurrency = data_file.get('concurrency', 50)
-            aio.run(f, inserts, concurrency=concurrency, loop=loop)
+            aio.run(self.exec_many, inserts, concurrency=concurrency, loop=loop)
             cursor.execute('refresh table {target}'.format(target=data_file['target']))
 
     def run_load_data(self, data_spec):
@@ -78,8 +78,7 @@ class Executor:
         if num_records:
             num_records = max(1, int(num_records / bulk_size))
         stats = Stats(size=num_records)
-        cursor = self.conn.cursor()
-        f = partial(aio.measure, stats, partial(aio.execute_many, self.loop, cursor))
+        f = partial(aio.measure, stats, self.exec_many)
         start = time()
         aio.run(f,
                 inserts,
@@ -114,6 +113,7 @@ class Executor:
                 self.process_result(result)
 
 
+@argh.arg('benchmark_hosts', type=to_hosts)
 def bench(spec, benchmark_hosts, result_hosts=None):
     executor = Executor(
         spec_dir=os.path.dirname(spec),

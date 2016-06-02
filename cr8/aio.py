@@ -3,6 +3,8 @@ from tqdm import tqdm
 import asyncio
 import aiohttp
 import json
+import functools
+import itertools
 try:
     import uvloop
     asyncio.set_event_loop_policy(uvloop.EventLoopPolicy())
@@ -10,12 +12,7 @@ except ImportError:
     pass
 
 
-async def execute(urls, stmt, args=None):
-    payload = {'stmt': stmt}
-    if args:
-        payload['args'] = args
-    data = json.dumps(payload)
-    url = next(urls)
+async def _exec(url, data):
     with aiohttp.ClientSession() as session:
         async with session.post(url, data=data) as resp:
             r = await resp.json()
@@ -24,10 +21,21 @@ async def execute(urls, stmt, args=None):
             return r['duration']
 
 
-async def execute_many(loop, cursor, stmt, bulk_args):
-    f = loop.run_in_executor(None, cursor.executemany, stmt, bulk_args)
-    await f
-    return cursor.duration
+async def execute(urls, stmt, args=None):
+    payload = {'stmt': stmt}
+    if args:
+        payload['args'] = args
+    return await _exec(next(urls), json.dumps(payload))
+
+
+async def execute_many(urls, stmt, bulk_args):
+    data = json.dumps(dict(stmt=stmt, bulk_args=bulk_args))
+    return await _exec(next(urls), data)
+
+
+def create_execute_many(hosts):
+    urls = itertools.cycle([i + '/_sql' for i in hosts])
+    return functools.partial(execute_many, urls)
 
 
 async def measure(stats, f, *args, **kws):

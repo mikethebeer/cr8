@@ -14,8 +14,8 @@ from concurrent.futures import ProcessPoolExecutor
 
 from .json2insert import to_insert
 from .misc import parse_table
-from .aio import asyncio, consume, execute_many
-from .cli import to_int
+from .aio import asyncio, consume, create_execute_many
+from .cli import to_int, to_hosts
 
 
 PROVIDER_LIST_URL = 'http://fake-factory.readthedocs.org/en/latest/providers.html'
@@ -106,8 +106,8 @@ def generate_bulk_args(generate_row, bulk_size):
     return [generate_row() for i in range(bulk_size)]
 
 
-async def _produce_data_and_insert(q, cursor, stmt, bulk_args_fun, num_inserts):
-    insert = partial(execute_many, loop, cursor)
+async def _produce_data_and_insert(q, hosts, stmt, bulk_args_fun, num_inserts):
+    insert = create_execute_many(hosts)
     executor = ProcessPoolExecutor()
     for i in range(num_inserts):
         args = await asyncio.ensure_future(
@@ -119,7 +119,7 @@ async def _produce_data_and_insert(q, cursor, stmt, bulk_args_fun, num_inserts):
 
 @argh.arg('fqtable', help='(fully qualified) table name. \
           Either <schema>.<table> or just <table>')
-@argh.arg('hosts', help='crate hosts', type=str)
+@argh.arg('hosts', help='crate hosts', type=to_hosts)
 @argh.arg('num_records', help='number of records to insert', type=to_int)
 @argh.arg('--bulk-size', type=to_int)
 @argh.arg('--concurrency', type=to_int)
@@ -176,7 +176,7 @@ def fill_table(hosts,
     yield 'Generating fake data and executing inserts'
     q = asyncio.Queue(maxsize=concurrency)
     loop.run_until_complete(asyncio.gather(
-        _produce_data_and_insert(q, conn.cursor(), stmt, bulk_args_fun, num_inserts),
+        _produce_data_and_insert(q, hosts, stmt, bulk_args_fun, num_inserts),
         consume(q, total=num_inserts)))
 
 
