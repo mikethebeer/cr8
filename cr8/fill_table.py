@@ -135,7 +135,7 @@ def fill_table(hosts,
                fqtable,
                num_records,
                bulk_size=1000,
-               concurrency=100,
+               concurrency=25,
                mapping_file=None):
     """ fills a table with random data
 

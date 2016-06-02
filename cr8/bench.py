@@ -64,7 +64,7 @@ class Executor:
         for data_file in instructions.data_files:
             inserts = as_bulk_queries(self._to_inserts(data_file),
                                       data_file.get('bulk_size', 5000))
-            concurrency = data_file.get('concurrency', 50)
+            concurrency = data_file.get('concurrency', 25)
             aio.run(self.client.execute_many, inserts, concurrency=concurrency, loop=loop)
             cursor.execute('refresh table {target}'.format(target=data_file['target']))
 
@@ -73,7 +73,7 @@ class Executor:
         statement = next(iter(inserts))[0]
         bulk_size = data_spec.get('bulk_size', 5000)
         inserts = as_bulk_queries(self._to_inserts(data_spec), bulk_size)
-        concurrency = data_spec.get('concurrency', 50)
+        concurrency = data_spec.get('concurrency', 25)
         num_records = data_spec.get('num_records', None)
         if num_records:
             num_records = max(1, int(num_records / bulk_size))

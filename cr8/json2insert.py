@@ -47,7 +47,7 @@ def print_only(table):
 @argh.arg('--hosts', type=to_hosts, help='crate hosts which will be used \
           to execute the insert statement')
 @argh.arg('-c', '--concurrency', type=to_int)
-def json2insert(table, bulk_size=1000, concurrency=100, hosts=None):
+def json2insert(table, bulk_size=1000, concurrency=25, hosts=None):
     """ Converts the given json line (read from stdin) into an insert statement
 
     If hosts are specified the insert statement will be executed on those hosts.
