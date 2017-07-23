@@ -120,8 +120,8 @@ class HttpClient:
         self._conn_pool_limit = conn_pool_limit
         self._session = None
 
-    async def get_session(self):
-        if not self._session:
+    async def get_session(self, renew_session=False):
+        if not self._session or renew_session:
             conn = aiohttp.TCPConnector(limit=self._conn_pool_limit)
             self._session = aiohttp.ClientSession(connector=conn)
         return self._session
@@ -131,7 +131,12 @@ class HttpClient:
         if args:
             payload['args'] = _plain_or_callable(args)
         session = await self.get_session()
-        return await _exec(session, next(self.urls), json.dumps(payload, cls=CrateJsonEncoder))
+        try:
+            return await _exec(session, next(self.urls), json.dumps(payload, cls=CrateJsonEncoder))
+        except SqlException:
+            # Failover
+            session = await self.get_session(True)
+            return await _exec(session, next(self.urls), json.dumps(payload, cls=CrateJsonEncoder))
 
     async def execute_many(self, stmt, bulk_args):
         data = json.dumps(dict(
