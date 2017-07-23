@@ -144,7 +144,12 @@ class HttpClient:
             bulk_args=_plain_or_callable(bulk_args)
         ), cls=CrateJsonEncoder)
         session = await self.get_session()
-        return await _exec(session, next(self.urls), data)
+        try:
+            return await _exec(session, next(self.urls), data)
+        except SqlException:
+            # Failover
+            session = await self.get_session(True)
+            return await _exec(session, next(self.urls), data)
 
     async def get_server_version(self):
         session = await self.get_session()
