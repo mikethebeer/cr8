@@ -167,6 +167,7 @@ class HttpClient:
     def close(self):
         if self._session:
             self._session.close()
+            self._session = None
 
     def __enter__(self):
         return self
